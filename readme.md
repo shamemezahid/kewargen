@@ -2,6 +2,8 @@
 
 A simple, browser-based QR code generator. Open `kewargen.html` in a web browser, enter your information, and click **Generate QR Code**.
 
+<img width="1850" height="1015" alt="image" src="https://github.com/user-attachments/assets/d9418929-e85a-4dc1-a4d9-8fc9f4b690f0" />
+
 ### Features
 
 - Create QR codes for:
