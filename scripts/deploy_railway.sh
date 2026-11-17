@@ -45,3 +45,4 @@ echo " ✅ Deployment complete!"
 echo " 🌐 Live URL: https://kewargen-production.up.railway.app"
 echo " 📊 Dashboard: Run 'railway open' to view deployment details"
 echo "======================================================="
+

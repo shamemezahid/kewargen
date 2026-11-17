@@ -428,240 +428,261 @@ INDEX_HTML = """<!DOCTYPE html>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Kewargen - Batch VCF QR Code Generator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Recursive:slnt,wght,CASL,CRSV,MONO@-15..0,300..1000,0..1,0..1,0..1&display=swap" rel="stylesheet" />
   <style>
-    :root {
-      --bg: #0f172a;
-      --card-bg: #1e293b;
-      --border: #334155;
-      --text: #f8fafc;
-      --text-muted: #94a3b8;
-      --primary: #38bdf8;
-      --primary-hover: #0284c7;
-      --accent: #10b981;
+    * {
+      box-sizing: border-box;
+      font-family: "Recursive", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+    }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.5;
-      padding: 2rem 1rem;
-    }
-    .container {
-      max-width: 800px;
-      margin: 0 auto;
-    }
-    header {
-      text-align: center;
-      margin-bottom: 2.5rem;
-    }
-    header h1 {
-      font-size: 2.25rem;
-      font-weight: 700;
-      color: var(--primary);
-      margin-bottom: 0.5rem;
-    }
-    header p {
-      color: var(--text-muted);
-      font-size: 1.05rem;
-    }
-    .card {
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 1.75rem;
-      margin-bottom: 2rem;
-      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-    }
-    .card h2 {
-      font-size: 1.25rem;
-      margin-bottom: 1rem;
-      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      background: linear-gradient(135deg, #fffbeb 0%, #fafaf9 40%, rgba(253, 230, 138, 0.35) 100%);
+      min-height: 100dvh;
       display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-    .dropzone {
-      border: 2px dashed var(--border);
-      border-radius: 8px;
-      padding: 2.5rem 1.5rem;
-      text-align: center;
-      cursor: pointer;
-      transition: border-color 0.2s, background-color 0.2s;
-    }
-    .dropzone:hover, .dropzone.dragover {
-      border-color: var(--primary);
-      background-color: rgba(56, 189, 248, 0.05);
-    }
-    .dropzone svg {
-      width: 48px;
-      height: 48px;
-      stroke: var(--primary);
-      margin-bottom: 0.75rem;
-    }
-    .dropzone p {
-      color: var(--text-muted);
-      margin-bottom: 0.5rem;
-    }
-    .btn {
-      display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 0.5rem;
-      font-weight: 600;
-      padding: 0.65rem 1.25rem;
-      border-radius: 6px;
-      border: none;
-      cursor: pointer;
-      text-decoration: none;
-      font-size: 0.95rem;
-      transition: background-color 0.2s;
+      padding: 1.5rem;
     }
-    .btn-primary {
-      background: var(--primary);
-      color: #0f172a;
+    .card {
+      width: 100%;
+      max-width: 580px;
+      background: #ffffff;
+      border-radius: 1.25rem;
+      border: 1px solid rgba(231, 229, 228, 0.6);
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1),
+                  0 8px 10px -6px rgba(0, 0, 0, 0.1),
+                  0 4px 12px rgba(120, 53, 15, 0.08);
+      padding: 2rem;
+      animation: cardUp 0.5s cubic-bezier(0.16, 1, 0.3, 1);
     }
-    .btn-primary:hover {
-      background: var(--primary-hover);
+    @keyframes cardUp {
+      from { opacity: 0; transform: translateY(14px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 1.5rem;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+    .app-title {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #1c1917;
+      letter-spacing: -0.02em;
+      margin: 0;
+    }
+    .app-subtitle {
+      font-size: 0.875rem;
+      color: #78716c;
+      margin-top: 0.25rem;
     }
     .btn-secondary {
-      background: transparent;
-      border: 1px solid var(--border);
-      color: var(--text);
+      display: inline-flex;
+      align-items: center;
+      gap: 0.375rem;
+      padding: 0.45rem 0.85rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      border-radius: 0.5rem;
+      border: 1px solid #e7e5e4;
+      color: #57534e;
+      background: #fafaf9;
+      text-decoration: none;
+      transition: all 0.2s ease;
+      cursor: pointer;
     }
     .btn-secondary:hover {
-      background: var(--border);
+      background: #f5f5f4;
+      border-color: #d6d3d1;
+      color: #1c1917;
     }
-    .options-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 1rem;
-      margin: 1.25rem 0;
+    .dropzone {
+      border: 2px dashed #d6d3d1;
+      border-radius: 0.875rem;
+      background: #fafaf9;
+      padding: 3rem 1.5rem;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
     }
-    .option-group label {
-      display: block;
-      font-size: 0.85rem;
-      color: var(--text-muted);
-      margin-bottom: 0.25rem;
+    .dropzone:hover, .dropzone.dragover {
+      border-color: #d97706;
+      background: rgba(253, 230, 138, 0.15);
     }
-    .option-group input[type="color"],
-    .option-group input[type="number"] {
-      width: 100%;
-      height: 38px;
-      background: #0f172a;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      color: var(--text);
-      padding: 0 0.5rem;
+    .dropzone-icon-wrap {
+      width: 3.75rem;
+      height: 3.75rem;
+      border-radius: 0.875rem;
+      background: #ffffff;
+      border: 1px solid #e7e5e4;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 0.875rem;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
     }
-    .checkbox-label {
+    .dropzone svg {
+      width: 1.75rem;
+      height: 1.75rem;
+      stroke: #d97706;
+    }
+    .dropzone-title {
+      font-size: 0.9375rem;
+      font-weight: 500;
+      color: #1c1917;
+      margin: 0;
+    }
+    .dropzone-sub {
+      font-size: 0.8125rem;
+      color: #a8a29e;
+      margin-top: 0.35rem;
+    }
+    .checkbox-row {
       display: flex;
       align-items: center;
       gap: 0.5rem;
+      font-size: 0.875rem;
+      color: #57534e;
       cursor: pointer;
-      font-size: 0.9rem;
-      color: var(--text);
-      margin-top: 1.5rem;
+      margin-top: 1.25rem;
+      user-select: none;
+    }
+    .checkbox-row input {
+      accent-color: #d97706;
+      width: 1.1rem;
+      height: 1.1rem;
+      cursor: pointer;
+    }
+    .generate-btn {
+      width: 100%;
+      min-height: 48px;
+      padding: 0.75rem 1.5rem;
+      font-size: 0.9375rem;
+      font-weight: 600;
+      color: #fff;
+      border: none;
+      border-radius: 0.75rem;
+      background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+      cursor: pointer;
+      transition: all 0.25s ease;
+      box-shadow: 0 2px 8px rgba(180, 83, 9, 0.3);
+      position: relative;
+      overflow: hidden;
+      margin-top: 1.25rem;
+      font-family: inherit;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .generate-btn::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.15) 0%, transparent 60%);
+      pointer-events: none;
+    }
+    .generate-btn:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 16px rgba(180, 83, 9, 0.35);
+    }
+    .generate-btn:active:not(:disabled) {
+      transform: translateY(0);
+      box-shadow: 0 1px 4px rgba(180, 83, 9, 0.3);
+    }
+    .generate-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
     }
     .status {
       margin-top: 1rem;
       padding: 0.75rem 1rem;
-      border-radius: 6px;
-      font-size: 0.9rem;
+      border-radius: 0.5rem;
+      font-size: 0.875rem;
       display: none;
+      line-height: 1.4;
     }
-    .status.info { display: block; background: rgba(56, 189, 248, 0.15); color: var(--primary); }
-    .status.error { display: block; background: rgba(239, 68, 68, 0.15); color: #f87171; }
-    .status.success { display: block; background: rgba(16, 185, 129, 0.15); color: var(--accent); }
-    .api-docs pre {
-      background: #0f172a;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 1rem;
-      overflow-x: auto;
-      font-size: 0.85rem;
-      color: #38bdf8;
+    .status.info {
+      display: block;
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      color: #92400e;
+    }
+    .status.error {
+      display: block;
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      color: #b91c1c;
+    }
+    .status.success {
+      display: block;
+      background: #f0fdf4;
+      border: 1px solid #bbf7d0;
+      color: #166534;
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <header>
-      <h1>Kewargen Batch QR</h1>
-      <p>Convert CSV contact lists into clean SVG VCF QR codes instantly</p>
-    </header>
-
-    <div class="card">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-        <h2>Upload Contacts CSV</h2>
-        <a href="/api/template" class="btn btn-secondary" download="contacts_template.csv">
-          Download CSV Template
-        </a>
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <h1 class="app-title">Kewargen Batch QR</h1>
+        <p class="app-subtitle">Convert contacts CSV into SVG VCF QR codes</p>
       </div>
+      <a href="/api/template" class="btn-secondary" download="contacts_template.csv">
+        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+        </svg>
+        CSV Template
+      </a>
+    </div>
 
-      <div class="dropzone" id="dropzone">
-        <svg fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+    <div class="dropzone" id="dropzone">
+      <div class="dropzone-icon-wrap">
+        <svg fill="none" viewBox="0 0 24 24" stroke-width="1.75" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
         </svg>
-        <p id="dropText">Drag and drop your <strong>.csv</strong> file here, or click to browse</p>
-        <input type="file" id="fileInput" accept=".csv,text/csv" style="display: none;">
       </div>
-
-      <div class="options-grid">
-        <div class="option-group">
-          <label>Scale (Module size px)</label>
-          <input type="number" id="scale" value="5" min="1" max="20">
-        </div>
-        <div class="option-group">
-          <label>Border (Quiet Zone)</label>
-          <input type="number" id="border" value="2" min="0" max="10">
-        </div>
-        <div class="option-group">
-          <label>Foreground Color</label>
-          <input type="color" id="dark" value="#000000">
-        </div>
-        <div class="option-group">
-          <label>Background Color</label>
-          <input type="color" id="light" value="#ffffff">
-        </div>
-      </div>
-
-      <label class="checkbox-label">
-        <input type="checkbox" id="includeVcf" checked>
-        Also include raw <code>.vcf</code> contact cards in the ZIP
-      </label>
-
-      <div style="margin-top: 1.5rem;">
-        <button id="convertBtn" class="btn btn-primary" style="width: 100%;">
-          Convert & Download SVG QR Codes (ZIP)
-        </button>
-      </div>
-
-      <div id="status" class="status"></div>
+      <p class="dropzone-title" id="dropTitle">Drag & drop your contacts <strong>.csv</strong> here</p>
+      <p class="dropzone-sub" id="dropSub">or click to browse your files</p>
+      <input type="file" id="fileInput" accept=".csv,text/csv" style="display: none;">
     </div>
 
-    <div class="card api-docs">
-      <h2>Instant API Endpoints</h2>
-      <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 0.75rem;">
-        You can also call this service programmatically with <code>curl</code> or any HTTP client:
-      </p>
-      <pre><code># 1. Batch convert CSV directly to ZIP:
-curl -X POST http://localhost:8000/api/convert \\
-  --data-binary @scripts/contacts_template.csv \\
-  -o qr_codes.zip
+    <!-- Hidden configuration inputs with optimal defaults -->
+    <input type="hidden" id="scale" value="5">
+    <input type="hidden" id="border" value="2">
+    <input type="hidden" id="dark" value="#000000">
+    <input type="hidden" id="light" value="#ffffff">
 
-# 2. Generate a single SVG QR code:
-curl "http://localhost:8000/api/qr.svg?first_name=John&last_name=Doe&email=john@example.com" -o contact.svg
+    <label class="checkbox-row">
+      <input type="checkbox" id="includeVcf" checked>
+      Also include raw <code>.vcf</code> contact cards in the ZIP
+    </label>
 
-# 3. Download the standard CSV template:
-curl -O http://localhost:8000/api/template</code></pre>
-    </div>
+    <button id="convertBtn" class="generate-btn">
+      Convert & Download SVG QR Codes (ZIP)
+    </button>
+
+    <div id="status" class="status"></div>
   </div>
 
   <script>
     const dropzone = document.getElementById('dropzone');
     const fileInput = document.getElementById('fileInput');
-    const dropText = document.getElementById('dropText');
+    const dropTitle = document.getElementById('dropTitle');
+    const dropSub = document.getElementById('dropSub');
     const convertBtn = document.getElementById('convertBtn');
     const statusDiv = document.getElementById('status');
 
@@ -691,8 +712,9 @@ curl -O http://localhost:8000/api/template</code></pre>
         return;
       }
       selectedFile = file;
-      dropText.innerHTML = `Selected: <strong>${file.name}</strong> (${(file.size / 1024).toFixed(1)} KB)`;
-      showStatus(`Loaded ${file.name}. Ready to convert.`, 'info');
+      dropTitle.innerHTML = `Loaded: <strong>${file.name}</strong>`;
+      dropSub.textContent = `${(file.size / 1024).toFixed(1)} KB — Ready to convert`;
+      showStatus(`File "${file.name}" ready. Click below to generate your QR codes.`, 'info');
     }
 
     function showStatus(msg, type) {
@@ -702,11 +724,11 @@ curl -O http://localhost:8000/api/template</code></pre>
 
     convertBtn.addEventListener('click', async () => {
       if (!selectedFile) {
-        showStatus('Please upload a CSV file first.', 'error');
+        showStatus('Please select a CSV file first.', 'error');
         return;
       }
 
-      showStatus('Generating SVG QR codes...', 'info');
+      showStatus('Generating vector SVG QR codes...', 'info');
       convertBtn.disabled = true;
 
       const scale = document.getElementById('scale').value;
