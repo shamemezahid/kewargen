@@ -24,6 +24,12 @@ try:
 except ImportError:
     segno = None
 
+
+class CsvValidationError(ValueError):
+    """Raised when CSV structure, headers, or contact records are invalid."""
+    pass
+
+
 # -----------------------------------------------------------------------------
 # Configuration and Header Aliases
 # -----------------------------------------------------------------------------
@@ -33,7 +39,8 @@ HEADER_ALIASES = {
         "filename", "file_name", "output_filename", "svg_filename", "svg_name", "qr_name", "file"
     ],
     "first_name": [
-        "first_name", "firstname", "first", "given_name", "givenname", "fname"
+        "first_name", "firstname", "first", "given_name", "givenname", "fname",
+        "name", "full_name", "fullname", "contact_name"
     ],
     "last_name": [
         "last_name", "lastname", "last", "surname", "family_name", "familyname", "lname"
@@ -280,34 +287,77 @@ def generate_filename(contact: Dict[str, str], index: int) -> str:
 
 
 def parse_csv_stream(stream: io.TextIOBase) -> List[Dict[str, str]]:
-    """Parse CSV data into list of normalized contact dictionaries."""
-    reader = csv.reader(stream)
+    """Parse CSV data into list of normalized contact dictionaries.
+
+    Raises CsvValidationError if the file is empty, syntax is malformed,
+    no recognized contact headers are present, or no valid contact rows exist.
+    """
     try:
-        raw_headers = next(reader)
-    except StopIteration:
-        return []
+        reader = csv.reader(stream)
+        try:
+            raw_headers = next(reader)
+        except StopIteration:
+            raise CsvValidationError("The CSV file is empty. No header row found.")
+    except csv.Error as e:
+        raise CsvValidationError(f"Malformed CSV syntax: {e}")
+
+    # Check for empty headers
+    non_empty_headers = [h.strip() for h in raw_headers if h and str(h).strip()]
+    if not non_empty_headers:
+        raise CsvValidationError("The CSV header row is empty.")
 
     # Map raw CSV header column index to canonical field name
     header_mapping: Dict[int, str] = {}
+    recognized_contact_headers: List[str] = []
     for idx, h in enumerate(raw_headers):
         clean = normalize_header(h)
         if clean in LOOKUP_HEADER_MAP:
-            header_mapping[idx] = LOOKUP_HEADER_MAP[clean]
+            canonical = LOOKUP_HEADER_MAP[clean]
+            header_mapping[idx] = canonical
+            if canonical != "filename":
+                recognized_contact_headers.append(canonical)
         else:
             header_mapping[idx] = clean
 
+    if not recognized_contact_headers:
+        sample_headers = ", ".join(f"'{h}'" for h in non_empty_headers[:4])
+        raise CsvValidationError(
+            f"No recognized contact columns found in CSV (found: {sample_headers}). "
+            "Expected columns such as 'first_name', 'last_name', 'company', 'email', or 'phone'."
+        )
+
     contacts: List[Dict[str, str]] = []
-    for row in reader:
-        if not row or not any(field.strip() for field in row):
-            continue
-        contact: Dict[str, str] = {}
-        for col_idx, val in enumerate(row):
-            if col_idx in header_mapping:
-                clean_val = val.strip()
-                if clean_val:
-                    contact[header_mapping[col_idx]] = clean_val
-        if contact:
-            contacts.append(contact)
+    total_data_rows = 0
+    try:
+        for row in reader:
+            total_data_rows += 1
+            if not row or not any(field.strip() for field in row):
+                continue
+            contact: Dict[str, str] = {}
+            has_contact_data = False
+            for col_idx, val in enumerate(row):
+                if col_idx in header_mapping:
+                    clean_val = val.strip()
+                    if clean_val:
+                        field_name = header_mapping[col_idx]
+                        contact[field_name] = clean_val
+                        if field_name in LOOKUP_HEADER_MAP.values() and field_name != "filename":
+                            has_contact_data = True
+            if contact and has_contact_data:
+                contacts.append(contact)
+    except csv.Error as e:
+        raise CsvValidationError(f"Malformed CSV row data: {e}")
+
+    if total_data_rows == 0:
+        raise CsvValidationError(
+            "The CSV contains a header row, but has no contact data rows. Please add at least one contact."
+        )
+
+    if not contacts:
+        raise CsvValidationError(
+            "No valid contact records found. All data rows are missing required contact fields "
+            "(such as name, company, email, or phone)."
+        )
 
     return contacts
 
@@ -390,6 +440,9 @@ def process_csv_to_zip(
 ) -> bytes:
     """Processes CSV content in memory and returns a ZIP file containing SVG QRs."""
     ensure_segno()
+    if not csv_text or not csv_text.strip():
+        raise CsvValidationError("The uploaded CSV file is empty.")
+
     stream = io.StringIO(csv_text)
     contacts = parse_csv_stream(stream)
 
@@ -427,11 +480,16 @@ INDEX_HTML = """<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light">
   <title>Kewargen - Batch VCF QR Code Generator</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Recursive:slnt,wght,CASL,CRSV,MONO@-15..0,300..1000,0..1,0..1,0..1&display=swap" rel="stylesheet" />
   <style>
+    :root {
+      color-scheme: light;
+      accent-color: #d97706;
+    }
     * {
       box-sizing: border-box;
       font-family: "Recursive", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -450,6 +508,17 @@ INDEX_HTML = """<!DOCTYPE html>
       align-items: center;
       justify-content: center;
       padding: 1.5rem;
+    }
+    .visually-hidden {
+      position: absolute;
+      clip-path: inset(50%);
+      overflow: hidden;
+      width: 1px;
+      height: 1px;
+      margin: -1px;
+      padding: 0;
+      border: 0;
+      white-space: nowrap;
     }
     .card {
       width: 100%;
@@ -481,11 +550,13 @@ INDEX_HTML = """<!DOCTYPE html>
       color: #1c1917;
       letter-spacing: -0.02em;
       margin: 0;
+      text-wrap: balance;
     }
     .app-subtitle {
       font-size: 0.875rem;
       color: #78716c;
       margin-top: 0.25rem;
+      text-wrap: pretty;
     }
     .btn-secondary {
       display: inline-flex;
@@ -511,7 +582,7 @@ INDEX_HTML = """<!DOCTYPE html>
       border: 2px dashed #d6d3d1;
       border-radius: 0.875rem;
       background: #fafaf9;
-      padding: 3rem 1.5rem;
+      padding: 2.75rem 1.5rem;
       text-align: center;
       cursor: pointer;
       transition: all 0.2s ease;
@@ -519,10 +590,65 @@ INDEX_HTML = """<!DOCTYPE html>
       flex-direction: column;
       align-items: center;
       justify-content: center;
+      outline: none;
     }
     .dropzone:hover, .dropzone.dragover {
       border-color: #d97706;
       background: rgba(253, 230, 138, 0.15);
+    }
+    .dropzone:focus-visible {
+      border-color: #d97706;
+      box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.15);
+    }
+    .dropzone.valid {
+      border-color: #10b981;
+      border-style: solid;
+      background: rgba(240, 253, 244, 0.7);
+    }
+    .dropzone.valid:hover, .dropzone.valid.dragover {
+      border-color: #059669;
+      background: rgba(240, 253, 244, 0.9);
+    }
+    .dropzone.valid .dropzone-icon-wrap {
+      background: #dcfce7;
+      border-color: #86efac;
+    }
+    .dropzone.valid .dropzone-icon-wrap svg {
+      stroke: #16a34a;
+    }
+    .dropzone.valid .dropzone-title {
+      color: #166534;
+    }
+    .dropzone.valid .dropzone-sub {
+      color: #15803d;
+    }
+    .dropzone.failed {
+      border-color: #ef4444;
+      border-style: dashed;
+      background: #fef2f2;
+      box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12);
+    }
+    .dropzone.failed:hover, .dropzone.failed.dragover {
+      border-color: #dc2626;
+      background: #fee2e2;
+    }
+    .dropzone.failed:focus-visible {
+      border-color: #dc2626;
+      box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2);
+    }
+    .dropzone.failed .dropzone-icon-wrap {
+      background: #fee2e2;
+      border-color: #fca5a5;
+    }
+    .dropzone.failed .dropzone-icon-wrap svg {
+      stroke: #dc2626;
+    }
+    .dropzone.failed .dropzone-title {
+      color: #991b1b;
+      font-weight: 600;
+    }
+    .dropzone.failed .dropzone-sub {
+      color: #b91c1c;
     }
     .dropzone-icon-wrap {
       width: 3.75rem;
@@ -535,22 +661,74 @@ INDEX_HTML = """<!DOCTYPE html>
       justify-content: center;
       margin-bottom: 0.875rem;
       box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+      transition: all 0.2s ease;
     }
     .dropzone svg {
       width: 1.75rem;
       height: 1.75rem;
       stroke: #d97706;
+      transition: stroke 0.2s ease;
     }
     .dropzone-title {
       font-size: 0.9375rem;
       font-weight: 500;
       color: #1c1917;
       margin: 0;
+      text-wrap: balance;
     }
     .dropzone-sub {
       font-size: 0.8125rem;
       color: #a8a29e;
       margin-top: 0.35rem;
+      text-wrap: pretty;
+      line-height: 1.4;
+    }
+    .dropzone-actions {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.625rem;
+      margin-top: 1rem;
+      flex-wrap: wrap;
+    }
+    .btn-retry {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.375rem;
+      padding: 0.45rem 0.85rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      border-radius: 0.5rem;
+      border: 1px solid #fca5a5;
+      color: #b91c1c;
+      background: #ffffff;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      font-family: inherit;
+    }
+    .btn-retry:hover {
+      background: #fee2e2;
+      border-color: #ef4444;
+      color: #991b1b;
+    }
+    .btn-template-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.375rem;
+      padding: 0.45rem 0.85rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      border-radius: 0.5rem;
+      border: 1px solid #e7e5e4;
+      color: #57534e;
+      background: #ffffff;
+      text-decoration: none;
+      transition: all 0.2s ease;
+    }
+    .btn-template-link:hover {
+      background: #f5f5f4;
+      border-color: #d6d3d1;
+      color: #1c1917;
     }
     .checkbox-row {
       display: flex;
@@ -605,6 +783,8 @@ INDEX_HTML = """<!DOCTYPE html>
     .generate-btn:disabled {
       opacity: 0.6;
       cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
     }
     .status {
       margin-top: 1rem;
@@ -613,6 +793,7 @@ INDEX_HTML = """<!DOCTYPE html>
       font-size: 0.875rem;
       display: none;
       line-height: 1.4;
+      text-wrap: pretty;
     }
     .status.info {
       display: block;
@@ -649,15 +830,35 @@ INDEX_HTML = """<!DOCTYPE html>
       </a>
     </div>
 
-    <div class="dropzone" id="dropzone">
-      <div class="dropzone-icon-wrap">
-        <svg fill="none" viewBox="0 0 24 24" stroke-width="1.75" stroke="currentColor">
+    <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Upload CSV contacts file" aria-invalid="false">
+      <div class="dropzone-icon-wrap" id="dropzoneIconWrap">
+        <!-- Default Upload Icon -->
+        <svg id="iconUpload" fill="none" viewBox="0 0 24 24" stroke-width="1.75" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+        </svg>
+        <!-- Failed Error Icon -->
+        <svg id="iconFailed" style="display: none;" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+        </svg>
+        <!-- Valid Success Icon -->
+        <svg id="iconValid" style="display: none;" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
       </div>
       <p class="dropzone-title" id="dropTitle">Drag & drop your contacts <strong>.csv</strong> here</p>
       <p class="dropzone-sub" id="dropSub">or click to browse your files</p>
-      <input type="file" id="fileInput" accept=".csv,text/csv" style="display: none;">
+      <div id="dropzoneActions" class="dropzone-actions" style="display: none;">
+        <button type="button" id="retryBtn" class="btn-retry">
+          <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+          </svg>
+          Choose Another File
+        </button>
+        <a href="/api/template" class="btn-template-link" download="contacts_template.csv">
+          Download Template
+        </a>
+      </div>
+      <input type="file" id="fileInput" accept=".csv,text/csv" class="visually-hidden">
     </div>
 
     <!-- Hidden configuration inputs with optimal defaults -->
@@ -671,11 +872,11 @@ INDEX_HTML = """<!DOCTYPE html>
       Also include raw <code>.vcf</code> contact cards in the ZIP
     </label>
 
-    <button id="convertBtn" class="generate-btn">
+    <button id="convertBtn" class="generate-btn" disabled>
       Convert & Download SVG QR Codes (ZIP)
     </button>
 
-    <div id="status" class="status"></div>
+    <div id="status" class="status" role="alert" aria-live="polite"></div>
   </div>
 
   <script>
@@ -683,12 +884,214 @@ INDEX_HTML = """<!DOCTYPE html>
     const fileInput = document.getElementById('fileInput');
     const dropTitle = document.getElementById('dropTitle');
     const dropSub = document.getElementById('dropSub');
+    const dropzoneActions = document.getElementById('dropzoneActions');
+    const retryBtn = document.getElementById('retryBtn');
     const convertBtn = document.getElementById('convertBtn');
     const statusDiv = document.getElementById('status');
+    const iconUpload = document.getElementById('iconUpload');
+    const iconFailed = document.getElementById('iconFailed');
+    const iconValid = document.getElementById('iconValid');
 
     let selectedFile = null;
 
-    dropzone.addEventListener('click', () => fileInput.click());
+    const KNOWN_CONTACT_HEADERS = new Set([
+      'firstname', 'first', 'givenname', 'fname', 'name', 'fullname', 'contactname',
+      'lastname', 'last', 'surname', 'familyname', 'lname',
+      'prefix', 'salutation', 'titleprefix', 'honorificprefix',
+      'suffix', 'honorificsuffix',
+      'title', 'jobtitle', 'position', 'role', 'designation', 'occupation',
+      'company', 'organization', 'organisation', 'org', 'companyname', 'employer',
+      'department', 'dept', 'division', 'team', 'unit',
+      'workphone', 'officephone', 'phonework', 'telwork', 'phone', 'telephone', 'phonenumber',
+      'mobilephone', 'cellphone', 'mobile', 'cell', 'telcell',
+      'fax', 'faxnumber', 'workfax',
+      'email', 'workemail', 'emailaddress', 'mail',
+      'personalemail', 'homeemail', 'emailhome', 'otheremail',
+      'companywebsite', 'website', 'url', 'companyurl', 'web', 'homepage', 'webpage', 'site',
+      'streetaddress', 'street', 'address', 'companyaddress', 'workaddress', 'addressline1', 'address1',
+      'city', 'town', 'locality',
+      'state', 'province', 'region',
+      'postalcode', 'zip', 'zipcode', 'postcode',
+      'country', 'nation',
+      'linkedin', 'linkedinurl', 'linkedinprofile',
+      'twitter', 'x', 'twitterurl', 'xurl',
+      'github', 'githuburl', 'githubprofile',
+      'notes', 'note', 'comment', 'comments', 'bio', 'description'
+    ]);
+
+    function escapeHtml(str) {
+      return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function normalizeHeaderJs(h) {
+      return String(h || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    }
+
+    function parseCsvRows(text) {
+      const rows = [];
+      let row = [];
+      let field = '';
+      let inQuotes = false;
+      for (let i = 0; i < text.length; i++) {
+        const char = text[i];
+        const next = text[i + 1];
+        if (char === '"') {
+          if (inQuotes && next === '"') {
+            field += '"';
+            i++;
+          } else {
+            inQuotes = !inQuotes;
+          }
+        } else if (char === ',' && !inQuotes) {
+          row.push(field);
+          field = '';
+        } else if ((char === '\r' || char === '\n') && !inQuotes) {
+          if (char === '\r' && next === '\n') i++;
+          row.push(field);
+          if (row.some(f => f.trim().length > 0)) {
+            rows.push(row);
+          }
+          row = [];
+          field = '';
+        } else {
+          field += char;
+        }
+      }
+      if (field.length > 0 || row.length > 0) {
+        row.push(field);
+        if (row.some(f => f.trim().length > 0)) {
+          rows.push(row);
+        }
+      }
+      return rows;
+    }
+
+    function validateCsvContent(text) {
+      if (!text || !text.trim()) {
+        return {
+          valid: false,
+          title: 'Empty File',
+          reason: 'The CSV file contains no data or text records.'
+        };
+      }
+      const rows = parseCsvRows(text);
+      if (rows.length === 0) {
+        return {
+          valid: false,
+          title: 'No CSV Rows',
+          reason: 'The file contains no readable CSV rows.'
+        };
+      }
+      const headerRow = rows[0];
+      const recognizedIndices = [];
+      for (let i = 0; i < headerRow.length; i++) {
+        const norm = normalizeHeaderJs(headerRow[i]);
+        if (KNOWN_CONTACT_HEADERS.has(norm)) {
+          recognizedIndices.push(i);
+        }
+      }
+      if (recognizedIndices.length === 0) {
+        const sample = headerRow.slice(0, 4).map(h => `"${h.trim()}"`).join(', ');
+        return {
+          valid: false,
+          title: 'No Contact Columns',
+          reason: `No recognized contact columns found in CSV (found: ${sample || 'none'}). Expected columns like 'first_name', 'last_name', 'company', 'email', or 'phone'.`
+        };
+      }
+      if (rows.length === 1) {
+        return {
+          valid: false,
+          title: 'No Contact Records',
+          reason: 'The CSV has a header row but 0 contact rows. Please add at least one contact.'
+        };
+      }
+      let validCount = 0;
+      for (let r = 1; r < rows.length; r++) {
+        const row = rows[r];
+        const hasData = recognizedIndices.some(idx => row[idx] && row[idx].trim().length > 0);
+        if (hasData) {
+          validCount++;
+        }
+      }
+      if (validCount === 0) {
+        return {
+          valid: false,
+          title: 'Empty Contact Rows',
+          reason: 'All contact records in the file are blank. Each contact must include information such as name, company, email, or phone.'
+        };
+      }
+      return { valid: true, count: validCount };
+    }
+
+    function resetDropzoneState() {
+      selectedFile = null;
+      fileInput.value = '';
+      dropzone.classList.remove('failed', 'valid');
+      dropzone.setAttribute('aria-invalid', 'false');
+      iconUpload.style.display = 'block';
+      iconFailed.style.display = 'none';
+      iconValid.style.display = 'none';
+      dropzoneActions.style.display = 'none';
+      dropTitle.innerHTML = 'Drag & drop your contacts <strong>.csv</strong> here';
+      dropSub.innerHTML = 'or click to browse your files';
+      statusDiv.style.display = 'none';
+      statusDiv.className = 'status';
+      convertBtn.disabled = true;
+    }
+
+    function setFailedState({ title, reason, statusMsg }) {
+      selectedFile = null;
+      fileInput.value = '';
+      dropzone.classList.remove('valid');
+      dropzone.classList.add('failed');
+      dropzone.setAttribute('aria-invalid', 'true');
+      iconUpload.style.display = 'none';
+      iconValid.style.display = 'none';
+      iconFailed.style.display = 'block';
+      dropzoneActions.style.display = 'flex';
+      dropTitle.innerHTML = `<span style="color:#b91c1c;font-weight:700;">Invalid CSV</span> — ${escapeHtml(title)}`;
+      dropSub.innerHTML = `${escapeHtml(reason)}<br><span style="display:inline-block;margin-top:0.35rem;color:#78716c;font-weight:500;">Click or drop a valid .csv file to try again</span>`;
+      showStatus(statusMsg || reason, 'error');
+      convertBtn.disabled = true;
+    }
+
+    function setLoadedState(file, count) {
+      selectedFile = file;
+      dropzone.classList.remove('failed');
+      dropzone.classList.add('valid');
+      dropzone.setAttribute('aria-invalid', 'false');
+      iconUpload.style.display = 'none';
+      iconFailed.style.display = 'none';
+      iconValid.style.display = 'block';
+      dropzoneActions.style.display = 'none';
+      dropTitle.innerHTML = `Loaded: <strong>${escapeHtml(file.name)}</strong>`;
+      dropSub.innerHTML = `<strong>${count}</strong> contact${count === 1 ? '' : 's'} detected (${(file.size / 1024).toFixed(1)} KB) — Ready to convert`;
+      showStatus(`File "${file.name}" ready (${count} contact${count === 1 ? '' : 's'}). Click below to generate your QR codes.`, 'info');
+      convertBtn.disabled = false;
+    }
+
+    dropzone.addEventListener('click', (e) => {
+      if (e.target.closest('#dropzoneActions')) return;
+      fileInput.click();
+    });
+
+    dropzone.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        fileInput.click();
+      }
+    });
+
+    retryBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      fileInput.click();
+    });
+
     fileInput.addEventListener('change', (e) => {
       if (e.target.files.length > 0) handleFile(e.target.files[0]);
     });
@@ -706,25 +1109,66 @@ INDEX_HTML = """<!DOCTYPE html>
       if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
     });
 
-    function handleFile(file) {
-      if (!file.name.toLowerCase().endsWith('.csv')) {
-        showStatus('Please select a valid .csv file', 'error');
+    async function handleFile(file) {
+      if (!file) return;
+
+      const fileName = file.name || '';
+      if (!fileName.toLowerCase().endsWith('.csv')) {
+        setFailedState({
+          title: 'Invalid File Extension',
+          reason: `"${fileName}" is not a .csv file. Please upload a standard CSV file.`,
+          statusMsg: `Upload failed: "${fileName}" is not a CSV file.`
+        });
         return;
       }
-      selectedFile = file;
-      dropTitle.innerHTML = `Loaded: <strong>${file.name}</strong>`;
-      dropSub.textContent = `${(file.size / 1024).toFixed(1)} KB — Ready to convert`;
-      showStatus(`File "${file.name}" ready. Click below to generate your QR codes.`, 'info');
+
+      if (file.size === 0) {
+        setFailedState({
+          title: 'Empty File',
+          reason: `"${fileName}" is completely empty (0 bytes).`,
+          statusMsg: `Upload failed: The file "${fileName}" contains 0 bytes.`
+        });
+        return;
+      }
+
+      let textData;
+      try {
+        textData = await file.text();
+      } catch (err) {
+        setFailedState({
+          title: 'Read Error',
+          reason: 'Could not read the file contents from your browser.',
+          statusMsg: `Upload failed: Could not read "${fileName}".`
+        });
+        return;
+      }
+
+      const result = validateCsvContent(textData);
+      if (!result.valid) {
+        setFailedState({
+          title: result.title,
+          reason: result.reason,
+          statusMsg: `Upload failed: ${result.reason}`
+        });
+        return;
+      }
+
+      setLoadedState(file, result.count);
     }
 
     function showStatus(msg, type) {
       statusDiv.textContent = msg;
       statusDiv.className = 'status ' + type;
+      statusDiv.style.display = 'block';
     }
 
     convertBtn.addEventListener('click', async () => {
       if (!selectedFile) {
-        showStatus('Please select a CSV file first.', 'error');
+        setFailedState({
+          title: 'No File Selected',
+          reason: 'Please select a valid CSV file before generating QR codes.',
+          statusMsg: 'No CSV file loaded. Please choose a CSV file first.'
+        });
         return;
       }
 
@@ -749,7 +1193,12 @@ INDEX_HTML = """<!DOCTYPE html>
 
         if (!response.ok) {
           const err = await response.text();
-          throw new Error(err || 'Failed to generate QR codes');
+          setFailedState({
+            title: 'Server Rejected File',
+            reason: err || 'The server rejected this CSV as invalid.',
+            statusMsg: `Error: ${err || 'Failed to generate QR codes'}`
+          });
+          return;
         }
 
         const blob = await response.blob();
@@ -763,10 +1212,13 @@ INDEX_HTML = """<!DOCTYPE html>
         window.URL.revokeObjectURL(downloadUrl);
 
         showStatus('Successfully generated and downloaded QR codes archive!', 'success');
-      } catch (err) {
-        showStatus('Error: ' + err.message, 'error');
-      } finally {
         convertBtn.disabled = false;
+      } catch (err) {
+        setFailedState({
+          title: 'Generation Failed',
+          reason: err.message,
+          statusMsg: `Error: ${err.message}`
+        });
       }
     });
   </script>
@@ -919,14 +1371,24 @@ class APIHandler(BaseHTTPRequestHandler):
                 self.send_cors_headers()
                 self.end_headers()
                 self.wfile.write(zip_bytes)
+            except CsvValidationError as e:
+                err = f"Invalid CSV file: {str(e)}".encode("utf-8")
+                self.send_response(HTTPStatus.BAD_REQUEST)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Content-Length", str(len(err)))
+                self.send_cors_headers()
+                self.end_headers()
+                self.wfile.write(err)
+                return
             except Exception as e:
                 err = f"Failed to process CSV: {str(e)}".encode("utf-8")
                 self.send_response(HTTPStatus.BAD_REQUEST)
-                self.send_header("Content-Type", "text/plain")
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
                 self.send_header("Content-Length", str(len(err)))
+                self.send_cors_headers()
                 self.end_headers()
                 self.wfile.write(err)
-            return
+                return
 
         elif path in ("/api/generate-single", "/api/qr.svg"):
             try:
@@ -1062,15 +1524,22 @@ def main():
 
     light_color = None if args.light.lower() in ("none", "transparent", "") else args.light
 
-    results = process_contacts_csv(
-        csv_file_path=csv_path,
-        output_dir=args.output,
-        scale=args.scale,
-        border=args.border,
-        dark=args.dark,
-        light=light_color,
-        save_vcf=args.save_vcf,
-    )
+    try:
+        results = process_contacts_csv(
+            csv_file_path=csv_path,
+            output_dir=args.output,
+            scale=args.scale,
+            border=args.border,
+            dark=args.dark,
+            light=light_color,
+            save_vcf=args.save_vcf,
+        )
+    except CsvValidationError as e:
+        sys.stderr.write(f"\n[Error] Invalid CSV file: {e}\n\n")
+        sys.exit(1)
+    except Exception as e:
+        sys.stderr.write(f"\n[Error] Failed to process contacts CSV: {e}\n\n")
+        sys.exit(1)
 
     print(f"\nSuccessfully generated {len(results)} SVG QR code(s) in '{args.output}':")
     for filename, _ in results:
